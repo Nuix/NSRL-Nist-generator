@@ -14,7 +14,20 @@ import javax.swing.JProgressBar
 import javax.swing.UIManager
 import javax.swing.WindowConstants
 import java.awt.Font
+UIManager.setLookAndFeel("com.sun.java.swing.plaf.windows.WindowsLookAndFeel")
 $cache = java.io.File.new(__FILE__).getParent() + "/temp/";
+
+$ui=true
+selectedKeys=[]
+if(ARGV.length > 0 )
+	selectedKeys=ARGV
+	$ui=false
+else
+	puts "No NSRL names submitted, assumed running via GUI required"
+end
+
+
+
 
 def secondsToElapsed(inputseconds)
 	if(inputseconds < 0)
@@ -41,7 +54,6 @@ end
 class DownloadReadExportDialog < JDialog
 	def initialize(title)
 		super nil, true
-		UIManager.setLookAndFeel("com.sun.java.swing.plaf.windows.WindowsLookAndFeel")
 		self.setTitle(title)
 		self.setSize(400, 355)
 		self.setAlwaysOnTop(true)
@@ -165,6 +177,10 @@ end
 
 
 def show_message(message,title="Message")
+	if(!$ui)
+		puts "#{title}\n#{message}"
+		return
+	end
 	jf=JFrame.new();
 	jf.setAlwaysOnTop(true); #ensure it's on top!
 	JOptionPane.showMessageDialog(jf,message,title,JOptionPane::PLAIN_MESSAGE)
@@ -280,17 +296,17 @@ end
 selection={}
 
 details.each {|key,value|selection[key + "\t" + value["size"]]=false}
-selection=getCheckedInput(selection,"Which items do you want to download?",release)
+if(selectedKeys.length ==0)
+	selection=getCheckedInput(selection,"Which items do you want to download?",release)
+	selectedKeys=selection.keys.select{|key|selection[key]==true}
+	selectedKeys=selectedKeys.map{|keyWithSize|keyWithSize.split("\t")[0]}
+end
 
-selectedKeys=selection.keys.select{|key|selection[key]==true}
-
-selectedKeys=selectedKeys.map{|keyWithSize|keyWithSize.split("\t")[0]}
 
 if(selectedKeys.length == 0)
 	show_message("No digests selected","Finished")
 	return
 end
-
 
 statMutex = Mutex.new
 stats={"Downloading"=>{},"Reading"=>{}}
