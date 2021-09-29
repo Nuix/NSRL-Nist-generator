@@ -12,7 +12,13 @@ Begin by downloading the latest release of this code.  Extract the contents of t
 
 ## Usage
 
+This script does use the sourceItemFactory to extract the containers produced by NSRL. This will require a licence that supports imager (or better!), so ARX, enterprise-workstation (not audited) etc.
+
 Click the script from menu. Follow the prompts to select the categories you wish to combine. When completed open a new workbench tab and your list should appear in the filter items.
+
+This script can also be run via nuix console. Append the options you'd like to use like the following and point the console to the script location.
+
+    nuix_console.exe "C:\Scripts\Download NSRL.nuixscript\runme.rb" "Modern RDS (unique)" "Android RDS" "iOS RDS"
 
 # How it works
 Downloads file:
