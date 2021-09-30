@@ -310,6 +310,8 @@ if(selectedKeys.length == 0)
 	return
 end
 
+puts selectedKeys.map{|key|'"' + key + '"'}.join(" ")
+
 statMutex = Mutex.new
 stats={"Downloading"=>{},"Reading"=>{}}
 selectedKeys.each do | selectedKey |
@@ -320,32 +322,27 @@ end
 
 queue=Set.new([])
 queueMutex = Mutex.new
-
-digestDir=java.io.File.new(java.lang.System.getProperty('nuix.userDataBase') + '/Digest Lists')
-
-if(!digestDir.exists())
-	if(!digestDir.mkdir())
-		digestDir=java.io.File.new(__FILE__) #defaulting back to the script directory if the script does not have access to the user database... 
-		begin
-			while(digestDir.getName().downcase() != "nuix")
-				#puts digestDir.getName()
-				digestDir=java.io.File.new(digestDir.getParent())
-			end
-			digestDir=java.io.File.new(digestDir.to_s + "/Digest Lists")
-			if(!digestDir.exists())
-				if(!digestDir.mkdir())
-					#puts "oh dear... we can't make even the digest list here..."
-					digestDir=java.io.File.new(__FILE__) #defaulting back to the script directory if the script does not have access to the user database... 
-				end
-			end
-		rescue Exception => ex
-			puts ex
-			puts ex.backtrace
-			puts digestDir
-			digestDir=java.io.File.new(__FILE__) #defaulting back to the script directory if the script does not have access to the user database... 
-		end		
+digestDir=java.io.File.new(java.io.File.new(__FILE__).getParent())
+begin
+	while((digestDir.getName().downcase() != "nuix") && (!(java.io.File.new(digestDir.to_s + "/Digest Lists").exists())) && (!(java.io.File.new(digestDir.to_s + "/Metadata Profiles").exists())))
+		#puts digestDir.getName()
+		digestDir=java.io.File.new(digestDir.getParent())
 	end
-end
+	digestDir=java.io.File.new(digestDir.to_s + "/Digest Lists")
+	if(!digestDir.exists())
+		if(!digestDir.mkdir())
+			#puts "oh dear... we can't make even the digest list here..."
+			digestDir=java.io.File.new(java.io.File.new(__FILE__).getParent()) #defaulting back to the script directory itself?
+		end
+	end
+rescue Exception => ex
+	puts ex
+	puts ex.backtrace
+	puts digestDir
+	digestDir=java.io.File.new(java.io.File.new(__FILE__).getParent()) #defaulting back to the script directory if the script does not have access to the user database... 
+	exit
+end	
+
 $digestListFile=java.io.File.new(digestDir.to_s + '/' + release + '.hash').to_s #including all the names had to be removed because it was breaching windows file path length (funny but true!)
 
 def recursiveSearchByName(sourceItem,name)
@@ -414,7 +411,7 @@ File.open($digestListFile,"wb") do |file| #this is the wrapper even before the G
 					sif.openFile(rawCompressedItem) do | rawContainer |
 						puts rawContainer.getName()
 						recursiveSearchByName(rawContainer,"NSRLFile.txt") do | nsrlFile |
-							puts "located:#{selectedKey}:#{nsrlFile.getName()}"
+							puts "located:#{rawContainer.getName()}:#{nsrlFile.getName()}"
 							unitPercent=100.00 / nsrlFile.getFileSize()
 							progress=0
 							inputStream=nsrlFile.getBinary().getBinaryData().getInputStream()
