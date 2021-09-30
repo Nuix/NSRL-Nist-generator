@@ -238,8 +238,10 @@ def downloadFile(url,sha=nil) #TODO: check sha
 				return cachePath
 			end
 			sif=$utilities.createSourceItemFactory()
-			cacheObj=sif.openFile(cachePath)
-			sha1Cached=cacheObj.getDigests().getSha1()
+			sha1Cached=""
+			sif.openFile(cachePath) do | cacheObj |
+				sha1Cached=cacheObj.getDigests().getSha1()
+			end
 			sif.close()
 			if(sha1Cached==sha)
 				if (block_given?)
@@ -346,6 +348,35 @@ if(!digestDir.exists())
 end
 $digestListFile=java.io.File.new(digestDir.to_s + '/' + release + '.hash').to_s #including all the names had to be removed because it was breaching windows file path length (funny but true!)
 
+def recursiveSearchByName(sourceItem,name)
+	begin
+		if((sourceItem.getName() == name) && (sourceItem.getType().getName()=='text/csv'))
+			yield sourceItem
+		else
+			if(['application/x-iso-image','application/x-zip-compressed','application/x-tar','application/x-gzip','filesystem/directory'].include? sourceItem.getType().getName())
+				sourceItem.getChildren().each do | child | #sometimes they are nested in zips
+					begin
+						recursiveSearchByName(child,name) do | locatedItem |
+							yield locatedItem
+						end
+					rescue Exception => ex
+						puts ex
+						puts ex.backtrace
+					ensure
+						child.close()
+					end
+				end
+			end
+		end
+	rescue Exception => ex
+		puts ex
+		puts ex.backtrace
+	ensure 
+		sourceItem.close()
+	end
+end
+
+
 puts "When finished the digest list will be available here:\n" + $digestListFile
 File.open($digestListFile,"wb") do |file| #this is the wrapper even before the GUI because if the file can't be created this is all for nothing... so it may as well be made first.
 	#Write headers
@@ -361,6 +392,7 @@ File.open($digestListFile,"wb") do |file| #this is the wrapper even before the G
 		$errors=false
 		selectedKeys.each_with_index do | selectedKey,index |
 			activities[index]=Thread.new{
+				sif=utilities.createSourceItemFactory()
 				begin
 					details[selectedKey]["sha"]=File.readlines(downloadFile(details[selectedKey]["shaUrl"])).map(&:strip).join("").split('=')[1].strip()
 					#puts details[selectedKey]["url"]
@@ -379,77 +411,73 @@ File.open($digestListFile,"wb") do |file| #this is the wrapper even before the G
 						dialog.setDownloadCurrent(current)
 						dialog.setDownloadMessage("#{stats["Downloading"].values.select{|val|val != 100}.length} remaining items")
 					end
-					sif=utilities.createSourceItemFactory()
-					rawContainer=sif.openFile(rawCompressedItem)
-					#puts rawContainer.getName()
-					if(rawContainer.getChildren().to_a.length() == 1)
-						rawContainer=rawContainer.getChildren().first() #usually it's a simple folder and underneath that is the file we are looking for
-					else
-						rawContainer.getChildren().each do | child | #sometimes they are nested in zips
-							if(child.getName()=="NSRLFILE.ZIP")
-								rawContainer=child
+					sif.openFile(rawCompressedItem) do | rawContainer |
+						puts rawContainer.getName()
+						recursiveSearchByName(rawContainer,"NSRLFile.txt") do | nsrlFile |
+							puts "located:#{selectedKey}:#{nsrlFile.getName()}"
+							unitPercent=100.00 / nsrlFile.getFileSize()
+							progress=0
+							inputStream=nsrlFile.getBinary().getBinaryData().getInputStream()
+							begin
+								reader = java.io.BufferedReader.new(java.io.InputStreamReader.new(inputStream));
+								while(reader.ready())
+									String line = reader.readLine()
+									progress=progress+line.length
+									statMutex.synchronize do 
+										stats["Reading"][selectedKey]=progress * unitPercent
+										current=stats["Reading"].values.inject(0, :+)
+										dialog.setReadCurrent(current)
+										dialog.setReadMessage("#{stats["Reading"].values.select{|val|val != 100}.length} remaining items")
+									end
+									line_sections=line.split(',')
+									md5_string=line_sections[1]
+									if(md5_string=='"MD5"')
+										next
+									end
+									md5_only=md5_string.gsub(/[^a-fA-F0-9]/,'')
+									
+									if(md5_only.length == 32)
+										queueMutex.synchronize do # ruby sortedSet is not guarenteed to be threadsafe... so a mutex is here to stop any funny business from happening.
+											md5_bytes=Array(md5_only).pack('H*') #packing it to save on memory space but also because the final format requires it anyway... win/win scenario for memory!
+											queue.add(md5_bytes)
+										end
+									else
+										puts "BAD MD5:#{md5_only}" #should never get here... allow it but we are't using it for the digest list
+									end
+								end
+							rescue Exception => ex
+								puts ex
+								puts ex.backtrace
+							ensure
+								inputStream.close()
 							end
-						end
-					end
-					rawContainer.getChildren().each do | child |
-						if(child.getName()!="NSRLFile.txt")
-							puts "Skipping:" + child.getName()
-							next
-						end
-						unitPercent=100.00 / child.getFileSize()
-						progress=0
-						inputStream=child.getBinary().getBinaryData().getInputStream()
-						reader = java.io.BufferedReader.new(java.io.InputStreamReader.new(inputStream));
-						while(reader.ready())
-							String line = reader.readLine()
-							progress=progress+line.length
+							#ensure it's finished in the UI
 							statMutex.synchronize do 
-								stats["Reading"][selectedKey]=progress * unitPercent
+								stats["Reading"][selectedKey]=100
 								current=stats["Reading"].values.inject(0, :+)
 								dialog.setReadCurrent(current)
 								dialog.setReadMessage("#{stats["Reading"].values.select{|val|val != 100}.length} remaining items")
 							end
-							line_sections=line.split(',')
-							md5_string=line_sections[1]
-							if(md5_string=='"MD5"')
-								next
-							end
-							md5_only=md5_string.gsub(/[^a-fA-F0-9]/,'')
-							
-							if(md5_only.length == 32)
-								queueMutex.synchronize do # ruby sortedSet is not guarenteed to be threadsafe... so a mutex is here to stop any funny business from happening.
-									md5_bytes=Array(md5_only).pack('H*') #packing it to save on memory space but also because the final format requires it anyway... win/win scenario for memory!
-									queue.add(md5_bytes)
-								end
-							else
-								puts "BAD MD5:#{md5_only}" #should never get here... allow it but we are't using it for the digest list
-							end
 						end
-						#ensure it's finished in the UI
-						statMutex.synchronize do 
-							stats["Reading"][selectedKey]=100
-							current=stats["Reading"].values.inject(0, :+)
-							dialog.setReadCurrent(current)
-							dialog.setReadMessage("#{stats["Reading"].values.select{|val|val != 100}.length} remaining items")
-						end
-						break
 					end
-					sif.close()
 				rescue Exception => ex
 					puts ex
 					puts ex.backtrace
 					$errors=true
+				ensure 
+					sif.close()
 				end
 			}
 		end
 		puts("waiting on threads to complete")
 		activities.each(&:join)
 		if($errors)
-			show_message("Error occured, most likely because of a memory issue - see log","Oh dear, aborting")
+			show_message("Error occured, most likely because of a memory or disk space issue - see log","Oh dear, aborting")
 			return
 		end
 		puts "sorting..."
 		dialog.setExportMax(queue.length)
+		dialog.setExportMessage("Sorting....")
 		queue=queue.to_a.sort!
 		puts "writing to file"
 		
